@@ -71,6 +71,7 @@ private:
 
     enum eObjectFilter { kOpaque = 0x1, kCutout = 0x2, kTransparent = 0x4, kAll = 0xF, kNone = 0x0 };
     void RenderObjects( GraphicsContext& Context, const Matrix4& ViewProjMat, eObjectFilter Filter = kAll );
+	void RenderWater(GraphicsContext& Context, const Matrix4& ViewProjMat, eObjectFilter Filter = kAll);
     void CreateParticleEffects();
     Camera m_Camera;
     std::auto_ptr<CameraController> m_CameraController;
@@ -97,6 +98,7 @@ private:
 
     D3D12_CPU_DESCRIPTOR_HANDLE m_ExtraTextures[6];
     Model m_Model;
+	Model m_Water;
     std::vector<bool> m_pMaterialIsCutout;
 
     Vector3 m_SunDirection;
@@ -211,6 +213,7 @@ void ModelViewer::Startup( void )
     TextureManager::Initialize(L"Textures/");
     ASSERT(m_Model.Load("Models/sponza.h3d"), "Failed to load model");
     ASSERT(m_Model.m_Header.meshCount > 0, "Model contains no meshes");
+	m_Water.GenerateWater();
 
     // The caller of this function can override which materials are considered cutouts
     m_pMaterialIsCutout.resize(m_Model.m_Header.materialCount);
@@ -344,6 +347,48 @@ void ModelViewer::RenderObjects( GraphicsContext& gfxContext, const Matrix4& Vie
     }
 }
 
+void ModelViewer::RenderWater(GraphicsContext& gfxContext, const Matrix4& ViewProjMat, eObjectFilter Filter)
+{
+	struct VSConstants
+	{
+		Matrix4 modelToProjection;
+		Matrix4 modelToShadow;
+		XMFLOAT3 viewerPos;
+	} vsConstants;
+	vsConstants.modelToProjection = ViewProjMat;
+	vsConstants.modelToShadow = m_SunShadow.GetShadowMatrix();
+	XMStoreFloat3(&vsConstants.viewerPos, m_Camera.GetPosition());
+
+	gfxContext.SetDynamicConstantBufferView(0, sizeof(vsConstants), &vsConstants);
+
+	uint32_t materialIdx = 0xFFFFFFFFul;
+
+	uint32_t VertexStride = m_Water.m_VertexStride;
+
+	for (uint32_t meshIndex = 0; meshIndex < m_Water.m_Header.meshCount; meshIndex++)
+	{
+		const Model::Mesh& mesh = m_Water.m_pMesh[meshIndex];
+
+		uint32_t indexCount = mesh.indexCount;
+		uint32_t startIndex = mesh.indexDataByteOffset / sizeof(uint16_t);
+		uint32_t baseVertex = mesh.vertexDataByteOffset / VertexStride;
+
+		if (mesh.materialIndex != materialIdx)
+		{
+			if (m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kCutout) ||
+				!m_pMaterialIsCutout[mesh.materialIndex] && !(Filter & kOpaque))
+				continue;
+
+			materialIdx = mesh.materialIndex;
+			gfxContext.SetDynamicDescriptors(2, 0, 6, m_Water.GetSRVs(materialIdx));
+		}
+
+		gfxContext.SetConstants(4, baseVertex, materialIdx);
+
+		gfxContext.DrawIndexed(indexCount, startIndex, baseVertex);
+	}
+}
+
 void ModelViewer::RenderLightShadows(GraphicsContext& gfxContext)
 {
     using namespace Lighting;
@@ -357,9 +402,11 @@ void ModelViewer::RenderLightShadows(GraphicsContext& gfxContext)
     m_LightShadowTempBuffer.BeginRendering(gfxContext);
     {
         gfxContext.SetPipelineState(m_ShadowPSO);
-        RenderObjects(gfxContext, m_LightShadowMatrix[LightIndex], kOpaque);
+        //RenderObjects(gfxContext, m_LightShadowMatrix[LightIndex], kOpaque);
+		RenderWater(gfxContext, m_LightShadowMatrix[LightIndex], kOpaque);
         gfxContext.SetPipelineState(m_CutoutShadowPSO);
-        RenderObjects(gfxContext, m_LightShadowMatrix[LightIndex], kCutout);
+        //RenderObjects(gfxContext, m_LightShadowMatrix[LightIndex], kCutout);
+		RenderWater(gfxContext, m_LightShadowMatrix[LightIndex], kCutout);
     }
     m_LightShadowTempBuffer.EndRendering(gfxContext);
 
@@ -429,6 +476,8 @@ void ModelViewer::RenderScene( void )
         gfxContext.SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         gfxContext.SetIndexBuffer(m_Model.m_IndexBuffer.IndexBufferView());
         gfxContext.SetVertexBuffer(0, m_Model.m_VertexBuffer.VertexBufferView());
+		gfxContext.SetIndexBuffer(m_Water.m_IndexBuffer.IndexBufferView());
+		gfxContext.SetVertexBuffer(0, m_Water.m_VertexBuffer.VertexBufferView());
     };
 
     pfnSetupGraphicsState();
@@ -452,13 +501,15 @@ void ModelViewer::RenderScene( void )
 #endif
             gfxContext.SetDepthStencilTarget(g_SceneDepthBuffer.GetDSV());
             gfxContext.SetViewportAndScissor(m_MainViewport, m_MainScissor);
-            RenderObjects(gfxContext, m_ViewProjMatrix, kOpaque );
+            //RenderObjects(gfxContext, m_ViewProjMatrix, kOpaque );
+			RenderWater(gfxContext, m_ViewProjMatrix, kOpaque);
         }
 
         {
             ScopedTimer _prof2(L"Cutout", gfxContext);
             gfxContext.SetPipelineState(m_CutoutDepthPSO);
-            RenderObjects(gfxContext, m_ViewProjMatrix, kCutout );
+            //RenderObjects(gfxContext, m_ViewProjMatrix, kCutout );
+			RenderWater(gfxContext, m_ViewProjMatrix, kCutout);
         }
     }
 
@@ -483,9 +534,11 @@ void ModelViewer::RenderScene( void )
 
             g_ShadowBuffer.BeginRendering(gfxContext);
             gfxContext.SetPipelineState(m_ShadowPSO);
-            RenderObjects(gfxContext, m_SunShadow.GetViewProjMatrix(), kOpaque);
+            //RenderObjects(gfxContext, m_SunShadow.GetViewProjMatrix(), kOpaque);
+			RenderWater(gfxContext, m_SunShadow.GetViewProjMatrix(), kOpaque);
             gfxContext.SetPipelineState(m_CutoutShadowPSO);
-            RenderObjects(gfxContext, m_SunShadow.GetViewProjMatrix(), kCutout);
+            //RenderObjects(gfxContext, m_SunShadow.GetViewProjMatrix(), kCutout);
+			RenderWater(gfxContext, m_SunShadow.GetViewProjMatrix(), kCutout);
             g_ShadowBuffer.EndRendering(gfxContext);
         }
 
@@ -514,12 +567,14 @@ void ModelViewer::RenderScene( void )
             gfxContext.SetRenderTarget(g_SceneColorBuffer.GetRTV(), g_SceneDepthBuffer.GetDSV_DepthReadOnly());
             gfxContext.SetViewportAndScissor(m_MainViewport, m_MainScissor);
 
-            RenderObjects( gfxContext, m_ViewProjMatrix, kOpaque );
+            //RenderObjects( gfxContext, m_ViewProjMatrix, kOpaque );
+			RenderWater(gfxContext, m_ViewProjMatrix, kOpaque);
 
             if (!ShowWaveTileCounts)
             {
                 gfxContext.SetPipelineState(m_CutoutModelPSO);
-                RenderObjects( gfxContext, m_ViewProjMatrix, kCutout );
+                //RenderObjects( gfxContext, m_ViewProjMatrix, kCutout );
+				RenderWater(gfxContext, m_ViewProjMatrix, kCutout);
             }
         }
 

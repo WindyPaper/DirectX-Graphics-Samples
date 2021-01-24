@@ -127,3 +127,113 @@ void Model::ComputeAllBoundingBoxes()
     }
     ComputeGlobalBoundingBox(m_Header.boundingBox);
 }
+
+void make_plane(int width, int height, unsigned char* vertices, uint16_t* indices, int vertex_stride)
+{
+	width++;
+	height++;
+
+	//int size = sizeof(CIwFVec2);
+	// Set up vertices
+	for (int y = 0; y < height; y++)
+	{
+		int base = y * width;
+		for (int x = 0; x < width; x++)
+		{
+			int index = base + x;
+			unsigned char* v = vertices + index * vertex_stride;
+			float* pos_uv = (float*)v;
+
+			pos_uv[0] = (float)x * 100.0f;
+			pos_uv[1] = 0.0f;
+			pos_uv[2] = (float)y * 100.0f;
+
+			pos_uv[3] = ((float)x) / width;
+			pos_uv[4] = ((float)y) / height;
+		}
+	}
+
+	// Set up indices
+	int i = 0;
+	height--;
+	for (int y = 0; y < height; y++)
+	{
+		int base = y * width;
+
+		//indices[i++] = (uint16)base;
+		for (int x = 0; x < width; x++)
+		{
+			indices[i++] = (uint16_t)(base + x);
+			indices[i++] = (uint16_t)(base + width + x);
+		}
+		// add a degenerate triangle (except in a last row)
+		if (y < height - 1)
+		{
+			indices[i++] = (uint16_t)((y + 1) * width + (width - 1));
+			indices[i++] = (uint16_t)((y + 1) * width);
+		}
+	}
+}
+
+void Model::GenerateWater()
+{
+	m_pMesh = new Mesh();
+	m_pMaterial = new Material;
+
+	m_Header.meshCount = 1;
+	m_Header.materialCount = 1;	
+
+	m_VertexStride = 3 * sizeof(float) + 2 * sizeof(float);//m_pMesh[0].vertexStride;
+
+	int row = 10;
+	int colume = 10;
+	int total_vertices = (row + 1) * (colume + 1);
+
+	int numIndPerRow = colume * 2 + 2;
+	int numIndDegensReq = (row - 1) * 2;
+	int total_indices = numIndPerRow * row + numIndDegensReq;
+
+	m_pMesh->materialIndex = 0;
+	m_pMesh->vertexCount = total_vertices;
+	m_pMesh->vertexDataByteOffset = 0;
+	m_pMesh->indexCount = total_indices;
+	m_pMesh->indexDataByteOffset = 0;
+
+	//planeInd = new uint16[total_indices];	
+
+	m_Header.vertexDataByteSize = m_VertexStride * total_vertices;
+	m_Header.indexDataByteSize = sizeof(uint16_t) * total_indices;
+
+	m_pVertexData = new unsigned char[m_Header.vertexDataByteSize];
+	m_pIndexData = new unsigned char[m_Header.indexDataByteSize];
+	//m_pVertexDataDepth = new unsigned char[m_Header.vertexDataByteSizeDepth];
+	//m_pIndexDataDepth = new unsigned char[m_Header.indexDataByteSize];
+
+	/*if (m_Header.vertexDataByteSize > 0)
+		if (1 != fread(m_pVertexData, m_Header.vertexDataByteSize, 1, file)) goto h3d_load_fail;
+	if (m_Header.indexDataByteSize > 0)
+		if (1 != fread(m_pIndexData, m_Header.indexDataByteSize, 1, file)) goto h3d_load_fail;
+
+	if (m_Header.vertexDataByteSizeDepth > 0)
+		if (1 != fread(m_pVertexDataDepth, m_Header.vertexDataByteSizeDepth, 1, file)) goto h3d_load_fail;
+	if (m_Header.indexDataByteSize > 0)
+		if (1 != fread(m_pIndexDataDepth, m_Header.indexDataByteSize, 1, file)) goto h3d_load_fail;*/
+
+	make_plane(colume, row, m_pVertexData, (uint16_t*)m_pIndexData, m_VertexStride);
+
+	m_VertexBuffer.Create(L"VertexBuffer", m_Header.vertexDataByteSize / m_VertexStride, m_VertexStride, m_pVertexData);
+	m_IndexBuffer.Create(L"IndexBuffer", m_Header.indexDataByteSize / sizeof(uint16_t), sizeof(uint16_t), m_pIndexData);
+	delete[] m_pVertexData;
+	m_pVertexData = nullptr;
+	delete[] m_pIndexData;
+	m_pIndexData = nullptr;
+
+	/*m_VertexBufferDepth.Create(L"VertexBufferDepth", m_Header.vertexDataByteSizeDepth / m_VertexStrideDepth, m_VertexStrideDepth, m_pVertexDataDepth);
+	m_IndexBufferDepth.Create(L"IndexBufferDepth", m_Header.indexDataByteSize / sizeof(uint16_t), sizeof(uint16_t), m_pIndexDataDepth);
+	delete[] m_pVertexDataDepth;
+	m_pVertexDataDepth = nullptr;
+	delete[] m_pIndexDataDepth;
+	m_pIndexDataDepth = nullptr;*/
+
+	LoadTextures();
+}
