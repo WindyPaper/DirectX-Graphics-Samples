@@ -14,6 +14,9 @@
 #pragma once
 
 #include "pch.h"
+#include <d3d12shader.h>
+#include <d3dcompiler.h>
+#include <wrl.h>
 
 class CommandContext;
 class RootSignature;
@@ -72,7 +75,59 @@ public:
     void SetPrimitiveRestart( D3D12_INDEX_BUFFER_STRIP_CUT_VALUE IBProps );
 
     // These const_casts shouldn't be necessary, but we need to fix the API to accept "const void* pShaderBytecode"
-    void SetVertexShader( const void* Binary, size_t Size ) { m_PSODesc.VS = CD3DX12_SHADER_BYTECODE(const_cast<void*>(Binary), Size); }
+    void SetVertexShader( const void* Binary, size_t Size ) 
+	{ 
+		m_PSODesc.VS = CD3DX12_SHADER_BYTECODE(const_cast<void*>(Binary), Size); 
+
+		/*ID3D12ShaderReflection* reflection;
+		D3DReflect(Binary, Size, IID_ID3D12ShaderReflection, (void**)& reflection);
+
+		D3D12_SHADER_DESC desc;
+		reflection->GetDesc(&desc);*/
+
+		/*Microsoft::WRL::ComPtr<ID3D12RootSignatureDeserializer> deserializer;
+		D3D12CreateRootSignatureDeserializer(Binary, Size, IID_PPV_ARGS(&deserializer));
+		D3D12_ROOT_SIGNATURE_DESC *desc = (D3D12_ROOT_SIGNATURE_DESC *)deserializer->GetRootSignatureDesc();*/
+
+		ID3D12ShaderReflection* reflection;
+		D3DReflect(Binary, Size, IID_ID3D12ShaderReflection, (void**)& reflection);
+
+		D3D12_SHADER_DESC desc;
+		reflection->GetDesc(&desc);
+
+		if (desc.InputParameters > 0)
+		{
+			for (int i = 0; i < desc.InputParameters; ++i)
+			{
+				D3D12_SIGNATURE_PARAMETER_DESC input_desc;
+				reflection->GetInputParameterDesc(i, &input_desc);
+				std::string name = input_desc.SemanticName;
+			}
+		}
+
+		// here ok. desc.ConstantBuffers == 3
+		for (unsigned int i = 0; i < desc.ConstantBuffers; ++i)
+		{
+			ID3D12ShaderReflectionConstantBuffer* buffer = reflection->GetConstantBufferByIndex(i);
+
+			D3D12_SHADER_BUFFER_DESC bufferDesc;
+			buffer->GetDesc(&bufferDesc);
+			// here ok. bufferDesc.Name == "cb3"
+
+			// here wrong! bufferDesc.Variables==1, I expected 2       
+			for (UINT j = 0; j < bufferDesc.Variables; j++)
+			{
+				ID3D12ShaderReflectionVariable* var = buffer->GetVariableByIndex(j);
+				D3D12_SHADER_VARIABLE_DESC varDesc;
+				var->GetDesc(&varDesc);
+				// here also wrong.
+				// I expect "MVP" first but it returns also "cb3"
+
+			}
+		}
+
+	}
+
     void SetPixelShader( const void* Binary, size_t Size ) { m_PSODesc.PS = CD3DX12_SHADER_BYTECODE(const_cast<void*>(Binary), Size); }
     void SetGeometryShader( const void* Binary, size_t Size ) { m_PSODesc.GS = CD3DX12_SHADER_BYTECODE(const_cast<void*>(Binary), Size); }
     void SetHullShader( const void* Binary, size_t Size ) { m_PSODesc.HS = CD3DX12_SHADER_BYTECODE(const_cast<void*>(Binary), Size); }
